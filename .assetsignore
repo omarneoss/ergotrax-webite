@@ -1,0 +1,7 @@
+src/
+wrangler.toml
+.assetsignore
+README.md
+ErgoTrax Site.dc.html
+.git/
+.github/

@@ -6,14 +6,29 @@ Egypt's first specialised ergonomics company. Bilingual (English / Arabic, RTL),
 
 | File | Purpose |
 | --- | --- |
-| `index.html` | Deployable entry point (same build, with title and meta). |
+| `index.html` | Deployable entry point (same build, with title and meta). Also carries the embedded account/dashboard app (see below). |
 | `ErgoTrax Site.dc.html` | Source file. Edit this, then re-copy to `index.html`. |
-| `support.js` | Runtime. Must sit next to both files. |
-| `assets/` | Logo files (full colour for light surfaces, white for navy). |
+| `support.js` | Runtime for the marketing site's reactive template. Must sit next to both HTML files. |
+| `assets/` | Logos, event photos, downloadable resources (RULA, REBA, NMQ, etc.), founder photo. |
+| `src/index.js` | Cloudflare Worker: serves the static site AND the `/api/*` accounts + content backend (D1). |
+| `wrangler.toml` | Worker config — binds the `assets` directory (repo root) and the `ergotrax-accounts` D1 database. |
+| `.assetsignore` | Keeps `src/`, config, and doc files out of the served static-asset bundle. |
 
-## Deploy on GitHub Pages
+## Deploy
 
-Push the folder, then Settings, Pages, Deploy from a branch, `main`, `/ (root)`. No build step.
+Live on Cloudflare Workers (assets + Worker in one deployment), not GitHub Pages:
+
+```
+npx wrangler deploy
+```
+
+Requires `wrangler login` once (Cloudflare account with access to the `ergotrax-webite` Worker and `ergotrax-accounts` D1 database, id `2e530974-059b-436f-b96d-5116be84e911`). This repo is the source of truth — always edit here and redeploy, rather than editing live.
+
+## Accounts & dashboard
+
+The site has a database-backed accounts system (D1: `users`, `clients`, `reports`, `bookings`, `sessions`, `content_items`), reachable at `/api/*` and driven from `src/index.js`. There is no separate login/dashboard URL — click the account icon in the site header (or go to `#/account`) to sign in as staff or a client. Staff get a dashboard (tabs: Clients, Bookings, Reports, Accounts, Site content, My account) embedded directly in `index.html`, hidden behind auth and toggled via the `#/account` hash route so it never appears to a signed-out visitor. Passwords are PBKDF2-hashed, salted per user; staff create both staff and client accounts from the Accounts tab.
+
+The **Site content** tab manages `tracks`, `events`, `articles`, `programmes`, `certificates`, and `resources` as JSON in D1 via `/api/content/<collection>`, seeded from this file's own `TRACKS`/`EVENTS`/`ARTICLES`/`PROGRAMMES`/`CERTS`/`RESOURCES` consts. Note: the public site template still renders from those hardcoded consts, not from the database — dashboard content edits are stored and API-ready, but wiring the live template to read from `/api/content/*` at render time is a follow-up, not done yet. Until then, content changes to the live site still go through this file.
 
 ## Routes
 
