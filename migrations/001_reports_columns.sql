@@ -1,0 +1,3 @@
+ALTER TABLE reports ADD COLUMN pdf_key TEXT;
+ALTER TABLE reports ADD COLUMN file_name TEXT;
+ALTER TABLE reports ADD COLUMN title TEXT;
