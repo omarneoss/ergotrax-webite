@@ -38,6 +38,11 @@ async function hashPassword(password, saltHex) {
   return { hash: hashHex, salt: saltOut };
 }
 
+function extFromName(name) {
+  const m = /\.[a-zA-Z0-9]+$/.exec(name || "");
+  return m ? m[0].toLowerCase() : "";
+}
+
 async function getUserFromToken(db, req) {
   const auth = req.headers.get("authorization") || "";
   const token = auth.replace(/^Bearer\s+/i, "");
@@ -136,8 +141,12 @@ async function handleApi(req, env, url) {
 
     if (url.pathname === "/api/reports" && req.method === "POST") {
       if (!user || user.role !== "staff") return json({ error: "forbidden" }, 403);
-      const { client_id, body } = await req.json();
-      await db.prepare("INSERT INTO reports (client_id, staff_id, body) VALUES (?, ?, ?)").bind(client_id, user.id, body).run();
+      const { client_id, title, body, pdf_key, file_name } = await req.json();
+      if (!client_id) return json({ error: "client_id required" }, 400);
+      await db
+        .prepare("INSERT INTO reports (client_id, staff_id, title, body, pdf_key, file_name) VALUES (?, ?, ?, ?, ?, ?)")
+        .bind(client_id, user.id, title || null, body || null, pdf_key || null, file_name || null)
+        .run();
       return json({ ok: true });
     }
 
@@ -151,6 +160,25 @@ async function handleApi(req, env, url) {
       }
       const { results } = await db.prepare("SELECT * FROM reports WHERE client_id = ? ORDER BY created_at DESC").bind(clientId).all();
       return json(results);
+    }
+
+    const reportFileMatch = url.pathname.match(/^\/api\/reports\/file\/(\d+)$/);
+    if (reportFileMatch && req.method === "GET") {
+      if (!user) return json({ error: "unauthorized" }, 401);
+      const report = await db.prepare("SELECT * FROM reports WHERE id = ?").bind(reportFileMatch[1]).first();
+      if (!report || !report.pdf_key) return json({ error: "not found" }, 404);
+      if (user.role !== "staff") {
+        const owns = await db.prepare("SELECT id FROM clients WHERE id = ? AND user_id = ?").bind(report.client_id, user.id).first();
+        if (!owns) return json({ error: "forbidden" }, 403);
+      }
+      const obj = await env.MEDIA.get(report.pdf_key);
+      if (!obj) return json({ error: "file missing" }, 404);
+      return new Response(obj.body, {
+        headers: {
+          "content-type": "application/pdf",
+          "content-disposition": `inline; filename="${(report.file_name || "report.pdf").replace(/"/g, "")}"`,
+        },
+      });
     }
 
     if (url.pathname === "/api/bookings" && req.method === "GET") {
@@ -238,14 +266,62 @@ async function handleApi(req, env, url) {
       return json({ ok: true });
     }
 
+    // ---- File uploads (staff only) — stored in R2, served back from /media/:key ----
+
+    if (url.pathname === "/api/upload" && req.method === "POST") {
+      if (!user || user.role !== "staff") return json({ error: "forbidden" }, 403);
+      const form = await req.formData();
+      const file = form.get("file");
+      const folder = String(form.get("folder") || "uploads").replace(/[^a-z0-9_-]/gi, "");
+      if (!file || typeof file === "string") return json({ error: "file required" }, 400);
+      const ext = extFromName(file.name) || "";
+      const key = `${folder}/${Date.now()}-${randomHex(6)}${ext}`;
+      await env.MEDIA.put(key, await file.arrayBuffer(), { httpMetadata: { contentType: file.type || "application/octet-stream" } });
+      return json({ key, url: `/media/${key}`, file_name: file.name });
+    }
+
+    // ---- Certificate verification (public) ----
+
+    if (url.pathname === "/api/verify-certificate" && req.method === "GET") {
+      const code = (url.searchParams.get("code") || "").trim().toUpperCase();
+      if (!code) return json({ error: "code required" }, 400);
+      const row = await db.prepare("SELECT data_json FROM content_items WHERE collection = 'certificates' AND slug = ?").bind(code).first();
+      if (!row) return json({ found: false });
+      const data = JSON.parse(row.data_json);
+      delete data.cert_code;
+      delete data.email;
+      delete data.whatsapp;
+      return json({ found: true, code, data });
+    }
+
     // ---- Site content CMS (public reads; staff-only writes) ----
 
     const CONTENT_COLLECTIONS = new Set(["tracks", "events", "articles", "programmes", "certificates", "resources"]);
+
+    const contentBulkMatch = url.pathname.match(/^\/api\/content\/([a-z]+)\/bulk$/);
+    if (contentBulkMatch && req.method === "POST") {
+      if (!user || user.role !== "staff") return json({ error: "forbidden" }, 403);
+      const collection = contentBulkMatch[1];
+      if (!CONTENT_COLLECTIONS.has(collection)) return json({ error: "unknown collection" }, 404);
+      const { items } = await req.json();
+      if (!Array.isArray(items) || !items.length) return json({ error: "items array required" }, 400);
+      let count = 0;
+      for (const it of items) {
+        if (!it || !it.slug || typeof it.data !== "object" || it.data === null) continue;
+        await db
+          .prepare("INSERT INTO content_items (collection, slug, data_json, updated_at) VALUES (?, ?, ?, datetime('now')) ON CONFLICT(collection, slug) DO UPDATE SET data_json = excluded.data_json, updated_at = excluded.updated_at")
+          .bind(collection, String(it.slug), JSON.stringify(it.data))
+          .run();
+        count++;
+      }
+      return json({ ok: true, count });
+    }
 
     const contentListMatch = url.pathname.match(/^\/api\/content\/([a-z]+)$/);
     if (contentListMatch && req.method === "GET") {
       const collection = contentListMatch[1];
       if (!CONTENT_COLLECTIONS.has(collection)) return json({ error: "unknown collection" }, 404);
+      if (collection === "certificates" && (!user || user.role !== "staff")) return json({ error: "forbidden" }, 403);
       const { results } = await db
         .prepare("SELECT slug, data_json, updated_at FROM content_items WHERE collection = ? ORDER BY updated_at DESC")
         .bind(collection)
@@ -272,6 +348,7 @@ async function handleApi(req, env, url) {
     if (contentItemMatch && req.method === "GET") {
       const [, collection, slug] = contentItemMatch;
       if (!CONTENT_COLLECTIONS.has(collection)) return json({ error: "unknown collection" }, 404);
+      if (collection === "certificates" && (!user || user.role !== "staff")) return json({ error: "forbidden" }, 403);
       const row = await db.prepare("SELECT slug, data_json, updated_at FROM content_items WHERE collection = ? AND slug = ?").bind(collection, decodeURIComponent(slug)).first();
       if (!row) return json({ error: "not found" }, 404);
       return json({ slug: row.slug, updated_at: row.updated_at, data: JSON.parse(row.data_json) });
@@ -305,10 +382,105 @@ async function handleApi(req, env, url) {
   }
 }
 
+// ---- Live content injection: swap the site's built-in const data for the latest
+// database content on every request for "/" and "/index.html", so dashboard edits
+// show up on the public site without a rebuild/redeploy. ----
+
+function findValueEnd(text, startIdx) {
+  let i = startIdx;
+  while (i < text.length && /\s/.test(text[i])) i++;
+  const open = text[i];
+  if (open !== "[" && open !== "{") return -1;
+  let depth = 0;
+  let inString = null;
+  let escaped = false;
+  for (; i < text.length; i++) {
+    const c = text[i];
+    if (inString) {
+      if (escaped) escaped = false;
+      else if (c === "\\") escaped = true;
+      else if (c === inString) inString = null;
+      continue;
+    }
+    if (c === '"' || c === "'" || c === "`") { inString = c; continue; }
+    if (c === "[" || c === "{") depth++;
+    else if (c === "]" || c === "}") {
+      depth--;
+      if (depth === 0) return i + 1;
+    }
+  }
+  return -1;
+}
+
+function replaceConst(text, name, value) {
+  const marker = `const ${name} = `;
+  const start = text.indexOf(marker);
+  if (start === -1) return text;
+  const valueStart = start + marker.length;
+  const valueEnd = findValueEnd(text, valueStart);
+  if (valueEnd === -1) return text;
+  const serialized = JSON.stringify(value).replace(/\u2028/g, "\\u2028").replace(/\u2029/g, "\\u2029").replace(/<\//g, "<\\/");
+  return text.slice(0, valueStart) + serialized + text.slice(valueEnd);
+}
+
+async function injectLiveContent(html, db) {
+  const collections = ["tracks", "events", "articles", "programmes", "certificates", "resources"];
+  const results = await Promise.all(
+    collections.map((c) =>
+      db.prepare("SELECT slug, data_json FROM content_items WHERE collection = ? ORDER BY id ASC").bind(c).all()
+    )
+  );
+  const byCollection = {};
+  collections.forEach((c, i) => {
+    byCollection[c] = results[i].results.map((r) => ({ slug: r.slug, data: JSON.parse(r.data_json) }));
+  });
+
+  let out = html;
+  out = replaceConst(out, "TRACKS", byCollection.tracks.map((r) => r.data));
+  out = replaceConst(out, "EVENTS", byCollection.events.map((r) => r.data));
+  out = replaceConst(out, "ARTICLES", byCollection.articles.map((r) => r.data));
+  out = replaceConst(out, "PROGRAMMES", byCollection.programmes.map((r) => r.data));
+  out = replaceConst(out, "RESOURCES", byCollection.resources.map((r) => r.data));
+  const certsObj = {};
+  for (const r of byCollection.certificates) {
+    const copy = Object.assign({}, r.data);
+    delete copy.cert_code;
+    delete copy.email;
+    delete copy.whatsapp;
+    certsObj[r.slug] = copy;
+  }
+  out = replaceConst(out, "CERTS", certsObj);
+  return out;
+}
+
 export default {
   async fetch(req, env) {
     const url = new URL(req.url);
     if (url.pathname.startsWith("/api/")) return handleApi(req, env, url);
+
+    const mediaMatch = url.pathname.match(/^\/media\/(.+)$/);
+    if (mediaMatch) {
+      const obj = await env.MEDIA.get(decodeURIComponent(mediaMatch[1]));
+      if (!obj) return new Response("not found", { status: 404 });
+      const headers = new Headers();
+      if (obj.httpMetadata && obj.httpMetadata.contentType) headers.set("content-type", obj.httpMetadata.contentType);
+      headers.set("cache-control", "public, max-age=31536000, immutable");
+      return new Response(obj.body, { headers });
+    }
+
+    if (url.pathname === "/" || url.pathname === "/index.html") {
+      const assetRes = await env.ASSETS.fetch(req);
+      if (assetRes.ok) {
+        const html = await assetRes.text();
+        const injected = await injectLiveContent(html, env.DB);
+        return new Response(injected, {
+          status: assetRes.status,
+          headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" },
+        });
+      }
+      return assetRes;
+    }
+
     return env.ASSETS.fetch(req);
   },
 };

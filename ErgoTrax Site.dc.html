@@ -933,9 +933,11 @@
         <h2>Add a report</h2>
         <form class="et-inline-form" onsubmit="return etAddReport(event)">
           <select id="et-nr_client" required><option value="">Select client…</option></select>
-          <button class="et-add" type="submit">Save report</button>
+          <input id="et-nr_title" placeholder="Title (optional)">
+          <input type="file" id="et-nr_pdf" accept="application/pdf" required>
+          <button class="et-add" type="submit">Upload report</button>
         </form>
-        <textarea id="et-nr_body" rows="4" style="width:100%" placeholder="Report body…" required></textarea>
+        <textarea id="et-nr_body" rows="3" style="width:100%" placeholder="Notes for this report (optional, not shown as a separate field to the client)"></textarea>
         <div id="et-reportsErr" class="et-err" style="margin-top:8px"></div>
       </section>
     </main>
@@ -990,10 +992,55 @@
             <option value="resources">Resources</option>
           </select>
         </h2>
+        <!-- Certificates: dedicated form + Excel bulk import (shown only for the certificates collection) -->
+        <div id="et-cert-panel" class="et-editor" style="display:none">
+          <div class="et-row"><strong>Add a certificate</strong></div>
+          <form onsubmit="return etAddCertificate(event)">
+            <div class="et-row">
+              <input id="et-cert_code" placeholder="Code (e.g. ETX-PT-2026-JS-3FA8)" required style="flex:1; min-width:200px; text-transform:uppercase">
+              <input id="et-cert_date" placeholder="Date (e.g. 31-8-2026)" style="flex:1; min-width:140px">
+            </div>
+            <div class="et-row">
+              <input id="et-cert_name_en" placeholder="Name (English)" required style="flex:1; min-width:160px">
+              <input id="et-cert_name_ar" placeholder="الاسم (عربي، اختياري)" style="flex:1; min-width:160px" dir="rtl">
+            </div>
+            <div class="et-row">
+              <input id="et-cert_workshop_en" placeholder="Workshop / session title (English)" style="flex:1; min-width:160px">
+              <input id="et-cert_workshop_ar" placeholder="اسم الورشة (عربي، اختياري)" style="flex:1; min-width:160px" dir="rtl">
+            </div>
+            <div class="et-row">
+              <input id="et-cert_track" placeholder="Track (e.g. ProTrack)" style="flex:1; min-width:140px">
+              <input id="et-cert_trainer" placeholder="Trainer" style="flex:1; min-width:140px">
+              <input id="et-cert_duration" placeholder="Duration (e.g. 2 hours)" style="flex:1; min-width:140px">
+            </div>
+            <div class="et-row">
+              <input id="et-cert_result_en" placeholder="Result (English)" value="Attended in full" style="flex:1; min-width:160px">
+              <input id="et-cert_result_ar" placeholder="النتيجة (عربي)" value="حضور كامل" style="flex:1; min-width:160px" dir="rtl">
+            </div>
+            <div class="et-err" id="et-cert_err"></div>
+            <div class="et-ok" id="et-cert_ok"></div>
+            <button class="et-add" type="submit" style="margin-top:6px">Add certificate</button>
+          </form>
+          <div style="height:1px; background:#E6E6E1; margin:18px 0"></div>
+          <div class="et-row"><strong>Bulk upload from Excel</strong></div>
+          <p class="et-sub" style="margin:0 0 10px">First row = column headers, any order, case-insensitive. Recognised columns: <code>code, name_en, name_ar, workshop_en, workshop_ar, date, track, trainer, duration_en, duration_ar, email, whatsapp number</code>. Only <code>code</code> and <code>name_en</code> are required — everything else is optional. Result defaults to "Attended in full" / "حضور كامل". Email/WhatsApp are stored for your records only and are never shown on the public verification page.</p>
+          <div class="et-row">
+            <input type="file" id="et-cert_excel" accept=".xlsx,.xls,.csv">
+            <button class="et-small" type="button" onclick="etImportCertificatesExcel()">Import</button>
+          </div>
+          <div class="et-err" id="et-cert_bulk_err"></div>
+          <div class="et-ok" id="et-cert_bulk_ok"></div>
+        </div>
+
         <div id="et-cc_editor" class="et-editor" style="display:none">
           <div class="et-row"><strong id="et-cc_editorTitle">New item</strong></div>
           <div class="et-row"><input id="et-cc_slug" placeholder="slug / code (unique id)" style="flex:1"></div>
           <textarea id="et-cc_json" spellcheck="false"></textarea>
+          <div class="et-row" style="margin-top:8px">
+            <input type="file" id="et-cc_file" accept="image/*,.pdf" style="flex:1">
+            <button class="et-small" type="button" onclick="etAttachFile()">Upload &amp; insert URL</button>
+          </div>
+          <p class="et-sub" style="margin:4px 0 0">Uploads the file and inserts its <code>/media/...</code> URL at your cursor in the JSON above — e.g. paste it into an event's <code>photos</code> array or a resource's <code>file</code> field.</p>
           <div class="et-err" id="et-cc_err" style="margin-top:8px"></div>
           <div class="et-row" style="margin-top:10px">
             <button class="et-add" onclick="etSaveContent()" type="button">Save</button>
@@ -2507,10 +2554,11 @@ class Component extends DCLogic {
     const res = this.state.certResult;
     let certFields = [];
     if (res && res.rec) {
-      const pr = PROGRAMMES.find(p => p.code === res.rec.programme) || PROGRAMMES[0];
+      const pr = PROGRAMMES.find(p => p.code === res.rec.programme);
+      const programmeLabel = res.rec.workshop ? this.L(res.rec.workshop) : this.L((pr || PROGRAMMES[0]).name);
       certFields = [
         { label: t.fHolder, value: this.L(res.rec.name) },
-        { label: t.fProgramme, value: this.L(pr.name) },
+        { label: t.fProgramme, value: programmeLabel },
         { label: t.fIssued, value: this.L(res.rec.issued) },
         { label: t.fResult, value: this.L(res.rec.result) },
         { label: t.certIdLabel, value: res.id }
@@ -2760,6 +2808,19 @@ class Component extends DCLogic {
     return false;
   };
 
+  window.etOpenReportPdf = function (reportId, fileName) {
+    var headers = {};
+    if (ET.token()) headers['authorization'] = 'Bearer ' + ET.token();
+    fetch('/api/reports/file/' + reportId, { headers: headers }).then(function (res) {
+      if (!res.ok) throw new Error('Could not open the file.');
+      return res.blob();
+    }).then(function (blob) {
+      var url = URL.createObjectURL(blob);
+      window.open(url, '_blank');
+      setTimeout(function () { URL.revokeObjectURL(url); }, 60000);
+    }).catch(function (err) { alert(err.message); });
+  };
+
   /* ---- Client home ---- */
   function etLoadClientHome() {
     ET.call('/api/me').then(function (me) {
@@ -2776,9 +2837,13 @@ class Component extends DCLogic {
         if (!me.client_id) { rEl.innerHTML = '<div class="et-empty">No reports yet.</div>'; return; }
         return ET.call('/api/reports/' + me.client_id).then(function (reports) {
           rEl.innerHTML = reports.length ? reports.map(function (r) {
-            return '<div style="padding:12px 0; border-top:1px solid #EEEEE9"><div class="et-sub">' +
-              new Date(r.created_at).toLocaleDateString() + '</div>' +
-              '<div style="margin-top:4px; white-space:pre-wrap">' + esc(r.body) + '</div></div>';
+            var titleHtml = '<div style="font-weight:600">' + esc(r.title || r.file_name || 'Report') + '</div>';
+            var dateHtml = '<div class="et-sub">' + new Date(r.created_at).toLocaleDateString() + '</div>';
+            var pdfHtml = r.pdf_key
+              ? '<button class="et-small" type="button" onclick="etOpenReportPdf(' + r.id + ', \'' + esc(r.file_name || 'report.pdf').replace(/'/g, "\\'") + '\')">Open PDF</button>'
+              : (r.body ? '<div style="margin-top:4px; white-space:pre-wrap">' + esc(r.body) + '</div>' : '');
+            return '<div style="display:flex; justify-content:space-between; align-items:flex-start; gap:12px; padding:12px 0; border-top:1px solid #EEEEE9">' +
+              '<div>' + titleHtml + dateHtml + '</div>' + pdfHtml + '</div>';
           }).join('') : '<div class="et-empty">No reports yet.</div>';
         });
       });
@@ -2887,13 +2952,24 @@ class Component extends DCLogic {
     var errEl = document.getElementById('et-reportsErr'); errEl.textContent = ''; errEl.className = 'et-err';
     var clientId = document.getElementById('et-nr_client').value;
     if (!clientId) { errEl.textContent = 'Select a client first.'; return false; }
-    ET.call('/api/reports', { method: 'POST', body: JSON.stringify({
-      client_id: clientId, body: document.getElementById('et-nr_body').value,
-    })}).then(function () {
+    var file = document.getElementById('et-nr_pdf').files[0];
+    if (!file) { errEl.textContent = 'Choose a PDF file.'; return false; }
+    errEl.textContent = 'Uploading…';
+    etUploadFile(file, 'reports').then(function (up) {
+      return ET.call('/api/reports', { method: 'POST', body: JSON.stringify({
+        client_id: clientId,
+        title: document.getElementById('et-nr_title').value,
+        body: document.getElementById('et-nr_body').value,
+        pdf_key: up.key,
+        file_name: up.file_name,
+      })});
+    }).then(function () {
+      document.getElementById('et-nr_title').value = '';
       document.getElementById('et-nr_body').value = '';
+      document.getElementById('et-nr_pdf').value = '';
       errEl.className = 'et-ok';
-      errEl.textContent = 'Report saved.';
-    }).catch(function (err) { errEl.textContent = err.message; });
+      errEl.textContent = 'Report uploaded.';
+    }).catch(function (err) { errEl.className = 'et-err'; errEl.textContent = err.message; });
     return false;
   };
 
@@ -2958,6 +3034,7 @@ class Component extends DCLogic {
   window.etLoadContent = function () {
     var collection = document.getElementById('et-cc_collection').value;
     etCloseEditor();
+    document.getElementById('et-cert-panel').style.display = collection === 'certificates' ? 'block' : 'none';
     var listEl = document.getElementById('et-cc_list');
     listEl.innerHTML = '<div class="et-empty">Loading…</div>';
     ET.call('/api/content/' + collection).then(function (items) {
@@ -3018,6 +3095,166 @@ class Component extends DCLogic {
     var collection = document.getElementById('et-cc_collection').value;
     ET.call('/api/content/' + collection + '/' + encodeURIComponent(slug), { method: 'DELETE' }).then(etLoadContent)
       .catch(function (err) { document.getElementById('et-cc_list').insertAdjacentHTML('afterbegin', '<div class="et-err">' + esc(err.message) + '</div>'); });
+  };
+
+  /* ---- File upload helper (images/PDFs -> R2 via /api/upload) ---- */
+  function etUploadFile(file, folder) {
+    var fd = new FormData();
+    fd.append('file', file);
+    fd.append('folder', folder);
+    var headers = {};
+    if (ET.token()) headers['authorization'] = 'Bearer ' + ET.token();
+    return fetch('/api/upload', { method: 'POST', body: fd, headers: headers }).then(function (res) {
+      return res.json().then(function (data) {
+        if (!res.ok) throw new Error((data && data.error) || 'Upload failed (' + res.status + ')');
+        return data;
+      });
+    });
+  }
+
+  window.etAttachFile = function () {
+    var input = document.getElementById('et-cc_file');
+    var errEl = document.getElementById('et-cc_err');
+    var file = input.files[0];
+    if (!file) { errEl.textContent = 'Choose a file first.'; return; }
+    var collection = document.getElementById('et-cc_collection').value;
+    errEl.textContent = 'Uploading…';
+    etUploadFile(file, collection).then(function (data) {
+      errEl.textContent = '';
+      var ta = document.getElementById('et-cc_json');
+      var pos = ta.selectionStart || ta.value.length;
+      var insert = JSON.stringify(data.url);
+      ta.value = ta.value.slice(0, pos) + insert + ta.value.slice(pos);
+      ta.focus();
+      ta.selectionStart = ta.selectionEnd = pos + insert.length;
+      input.value = '';
+    }).catch(function (err) { errEl.textContent = err.message; });
+  };
+
+  /* ---- Certificates: dedicated form + Excel bulk import ---- */
+  var ET_MONTHS_EN = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+  var ET_MONTHS_AR = ['يناير','فبراير','مارس','أبريل','مايو','يونيو','يوليو','أغسطس','سبتمبر','أكتوبر','نوفمبر','ديسمبر'];
+  var ET_AR_DIGITS = ['٠','١','٢','٣','٤','٥','٦','٧','٨','٩'];
+  function etToArNum(n) { return String(n).replace(/[0-9]/g, function (d) { return ET_AR_DIGITS[+d]; }); }
+  function etFmtDate(raw) {
+    var v = String(raw == null ? '' : raw).trim();
+    var m = v.match(/^(\d{1,2})[-\/.](\d{1,2})[-\/.](\d{4})$/);
+    if (!m) return { en: v, ar: v };
+    var d = +m[1], mo = +m[2] - 1, y = m[3];
+    if (mo < 0 || mo > 11) return { en: v, ar: v };
+    return {
+      en: d + ' ' + ET_MONTHS_EN[mo] + ' ' + y,
+      ar: etToArNum(d) + ' ' + ET_MONTHS_AR[mo] + ' ' + etToArNum(y),
+    };
+  }
+
+  window.etAddCertificate = function (e) {
+    e.preventDefault();
+    var errEl = document.getElementById('et-cert_err'); var okEl = document.getElementById('et-cert_ok');
+    errEl.textContent = ''; okEl.textContent = '';
+    var code = document.getElementById('et-cert_code').value.trim().toUpperCase();
+    if (!code) { errEl.textContent = 'Code is required.'; return false; }
+    var issued = etFmtDate(document.getElementById('et-cert_date').value);
+    var data = {
+      name: { en: document.getElementById('et-cert_name_en').value, ar: document.getElementById('et-cert_name_ar').value },
+      workshop: { en: document.getElementById('et-cert_workshop_en').value, ar: document.getElementById('et-cert_workshop_ar').value },
+      track: document.getElementById('et-cert_track').value,
+      trainer: document.getElementById('et-cert_trainer').value,
+      duration: { en: document.getElementById('et-cert_duration').value, ar: document.getElementById('et-cert_duration').value },
+      issued: issued,
+      result: { en: document.getElementById('et-cert_result_en').value || 'Attended in full', ar: document.getElementById('et-cert_result_ar').value || 'حضور كامل' },
+    };
+    ET.call('/api/content/certificates', { method: 'POST', body: JSON.stringify({ slug: code, data: data }) }).then(function () {
+      okEl.textContent = 'Certificate ' + code + ' added.';
+      ['et-cert_code', 'et-cert_name_en', 'et-cert_name_ar', 'et-cert_workshop_en', 'et-cert_workshop_ar', 'et-cert_date', 'et-cert_track', 'et-cert_trainer', 'et-cert_duration'].forEach(function (id) {
+        document.getElementById(id).value = '';
+      });
+      etLoadContent();
+    }).catch(function (err) { errEl.textContent = err.message; });
+    return false;
+  };
+
+  var etSheetJsLoading = null;
+  function etEnsureSheetJs() {
+    if (window.XLSX) return Promise.resolve();
+    if (etSheetJsLoading) return etSheetJsLoading;
+    etSheetJsLoading = new Promise(function (resolve, reject) {
+      var s = document.createElement('script');
+      s.src = 'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js';
+      s.onload = resolve;
+      s.onerror = function () { reject(new Error('Could not load the spreadsheet reader.')); };
+      document.head.appendChild(s);
+    });
+    return etSheetJsLoading;
+  }
+  function etNormalizeKey(k) { return String(k).toLowerCase().replace(/[^a-z0-9]/g, ''); }
+  function etRowGet(normRow, names) {
+    for (var i = 0; i < names.length; i++) {
+      var v = normRow[etNormalizeKey(names[i])];
+      if (v !== undefined && v !== null && String(v).trim() !== '') return String(v).trim();
+    }
+    return '';
+  }
+  window.etImportCertificatesExcel = function () {
+    var input = document.getElementById('et-cert_excel');
+    var errEl = document.getElementById('et-cert_bulk_err'); var okEl = document.getElementById('et-cert_bulk_ok');
+    errEl.textContent = ''; okEl.textContent = '';
+    var file = input.files[0];
+    if (!file) { errEl.textContent = 'Choose a spreadsheet first.'; return; }
+    errEl.textContent = 'Reading…';
+    etEnsureSheetJs().then(function () {
+      return file.arrayBuffer();
+    }).then(function (buf) {
+      var wb = XLSX.read(buf, { type: 'array' });
+      var sheet = wb.Sheets[wb.SheetNames[0]];
+      var rows = XLSX.utils.sheet_to_json(sheet, { defval: '' });
+      var items = [];
+      var skipped = 0;
+      for (var i = 0; i < rows.length; i++) {
+        var raw = rows[i];
+        var normRow = {};
+        for (var k in raw) { if (Object.prototype.hasOwnProperty.call(raw, k)) normRow[etNormalizeKey(k)] = raw[k]; }
+        var code = etRowGet(normRow, ['code']).toUpperCase();
+        var nameEn = etRowGet(normRow, ['name_en', 'nameen', 'name']);
+        if (!code || !nameEn) { skipped++; continue; }
+        var issued = etFmtDate(etRowGet(normRow, ['date', 'issued']));
+        items.push({
+          slug: code,
+          data: {
+            name: { en: nameEn, ar: etRowGet(normRow, ['name_ar', 'namear']) },
+            workshop: { en: etRowGet(normRow, ['workshop_en', 'workshopen']), ar: etRowGet(normRow, ['workshop_ar', 'workshopar']) },
+            track: etRowGet(normRow, ['track']),
+            trainer: etRowGet(normRow, ['trainer']),
+            duration: { en: etRowGet(normRow, ['duration_en', 'durationen', 'duration']), ar: etRowGet(normRow, ['duration_ar', 'durationar']) },
+            issued: issued,
+            result: {
+              en: etRowGet(normRow, ['result_en', 'resulten']) || 'Attended in full',
+              ar: etRowGet(normRow, ['result_ar', 'resultar']) || 'حضور كامل',
+            },
+            email: etRowGet(normRow, ['email']),
+            whatsapp: etRowGet(normRow, ['whatsapp', 'whatsappnumber', 'whatsappno']),
+          },
+        });
+      }
+      if (!items.length) throw new Error('No usable rows found — need at least a code and name_en column.');
+      errEl.textContent = 'Uploading ' + items.length + ' certificates' + (skipped ? ' (' + skipped + ' rows skipped, missing code/name)' : '') + '…';
+      var batches = [];
+      for (var b = 0; b < items.length; b += 200) batches.push(items.slice(b, b + 200));
+      var total = 0;
+      return batches.reduce(function (chain, batch) {
+        return chain.then(function () {
+          return ET.call('/api/content/certificates/bulk', { method: 'POST', body: JSON.stringify({ items: batch }) }).then(function (res) {
+            total += res.count;
+            errEl.textContent = 'Uploading… ' + total + ' / ' + items.length;
+          });
+        });
+      }, Promise.resolve()).then(function () { return { count: total, skipped: skipped }; });
+    }).then(function (res) {
+      errEl.textContent = '';
+      okEl.textContent = 'Imported ' + res.count + ' certificates.' + (res.skipped ? ' Skipped ' + res.skipped + ' rows without a code/name.' : '');
+      input.value = '';
+      etLoadContent();
+    }).catch(function (err) { errEl.textContent = err.message; });
   };
 })();
 </script>

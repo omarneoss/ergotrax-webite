@@ -1,0 +1,12 @@
+{
+  "name": "ergotrax-webite",
+  "private": true,
+  "scripts": {
+    "deploy": "wrangler deploy",
+    "import-certs": "node scripts/import-certs.js"
+  },
+  "devDependencies": {
+    "wrangler": "^4",
+    "xlsx": "^0.18.5"
+  }
+}

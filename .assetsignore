@@ -1,7 +1,11 @@
 src/
+scripts/
 wrangler.toml
 .assetsignore
 README.md
 ErgoTrax Site.dc.html
 .git/
 .github/
+node_modules/
+package.json
+package-lock.json
