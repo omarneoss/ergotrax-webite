@@ -9,3 +9,5 @@ ErgoTrax Site.dc.html
 node_modules/
 package.json
 package-lock.json
+.wrangler/
+migrations/
